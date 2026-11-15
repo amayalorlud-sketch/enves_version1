@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Copia de cada cuenta: solo su dueño, y con el correo verificado
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid && request.auth.token.email_verified == true;
+    }
+    // Alias y códigos de invitación: cualquiera con sesión puede comprobarlos; solo se reclaman una vez y a tu nombre
+    match /aliases/{alias} {
+      allow get: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+    }
+    match /codes/{code} {
+      allow get: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+    }
+    // Invitaciones completadas: las crea el invitado (una por persona) y solo las lee quien invitó
+    match /referrals/{inviteeUid} {
+      allow create: if request.auth != null && request.auth.uid == inviteeUid && request.resource.data.inviterUid != inviteeUid;
+      allow read: if request.auth != null && resource.data.inviterUid == request.auth.uid;
+    }
+  }
+}
