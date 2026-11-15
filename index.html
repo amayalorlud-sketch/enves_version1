@@ -8219,8 +8219,9 @@ function boot() {
     'permission-denied': 'Faltan las reglas de Firestore (Firestore Database → Reglas → Publicar).',
     'auth/too-many-requests': 'Demasiados intentos. Espera unos minutos.', 'auth/network-request-failed': 'Sin conexión. Revisa tu internet.',
   };
+  const within = (pr, ms = 6000) => Promise.race([pr, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
   const msg = (e) => (ERR[e?.code] || 'No se ha podido completar. Inténtalo de nuevo.') + (e?.code ? ' [' + e.code + ']' : '');
-  const busy = (on) => { document.querySelectorAll('#app button[type=submit]').forEach((b) => { b.disabled = on; }); };
+  const busy = (on) => { document.querySelectorAll('#app button[type=submit]').forEach((b) => { b.disabled = on; if (on) { b.dataset.t = b.dataset.t || b.textContent; b.textContent = 'Un momento…'; } else if (b.dataset.t) b.textContent = b.dataset.t; }); };
 
   /* ---------- Copia de la cuenta en la nube (users/{uid}) ---------- */
   function slice() {
@@ -8270,9 +8271,9 @@ function boot() {
   }
 
   async function enter() {
-    try { await pull(); } catch (e) { console.warn(e); }
+    try { await within(pull()); } catch (e) { console.warn(e); }
     resolveIdentity({ p: 'email', v: user.email.toLowerCase() });
-    try { await creditReferrals(); } catch (e) { console.warn(e); }
+    try { await within(creditReferrals()); } catch (e) { console.warn(e); }
   }
 
   async function sendVerify() {
@@ -8323,7 +8324,7 @@ function boot() {
       const em = document.querySelector('#fb-email')?.value.trim(); if (!em) return showErr('Escribe tu correo arriba y vuelve a pulsar.');
       try { await FB.sendPasswordResetEmail(auth, em); toast('Te hemos enviado un correo para cambiar la contraseña.'); } catch (er) { showErr(msg(er)); }
     }
-    if (a === 'fb-check') { try { await user.reload(); user = auth.currentUser; if (user.emailVerified) { await user.getIdToken(true); enter(); } else showErr('Todavía no nos consta. Abre el enlace del correo y vuelve a pulsar.'); } catch (er) { showErr(msg(er)); } }
+    if (a === 'fb-check') { try { await within(user.reload()); user = auth.currentUser; if (user.emailVerified) { await within(user.getIdToken(true)).catch(() => {}); enter(); } else showErr('Todavía no nos consta. Abre el enlace del correo y vuelve a pulsar.'); } catch (er) { showErr(msg(er)); } }
     if (a === 'fb-resend') { try { await sendVerify(); toast('Correo reenviado.'); } catch (er) { showErr(msg(er)); } }
     if (a === 'fb-out' || a === 'logout') { if (user) { try { await FB.signOut(auth); } catch { /* */ } } user = null; lastJson = ''; if (a === 'fb-out') { ui.auth = { step: 'email', p: 'email', mode: 'signup' }; render(); } }
   }, true);
@@ -8368,7 +8369,7 @@ function boot() {
 
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible' || !user || user.emailVerified || ui.auth?.step !== 'fb-verify') return;
-    try { await user.reload(); user = auth.currentUser; if (user.emailVerified) { await user.getIdToken(true); enter(); } } catch { /* */ }
+    try { await within(user.reload()); user = auth.currentUser; if (user.emailVerified) { await within(user.getIdToken(true)).catch(() => {}); enter(); } } catch { /* */ }
   });
   /* ---------- Al abrir la app ---------- */
   if (ready) {
@@ -8376,9 +8377,9 @@ function boot() {
     FB.onAuthStateChanged(auth, async (u) => {
       user = u;
       if (!u) return;
-      if (!u.emailVerified) { try { await u.reload(); user = auth.currentUser; } catch { /* */ } }
+      if (!u.emailVerified) { try { await within(u.reload()); user = auth.currentUser; } catch { /* */ } }
       if (!user.emailVerified) { if (!SESSION?.accountId) { ui.auth = { step: 'fb-verify' }; render(); } return; }
-      try { await user.getIdToken(true); await pull(); } catch (e) { console.warn(e); }
+      try { await within(user.getIdToken(true)).catch(() => {}); await within(pull()); } catch (e) { console.warn(e); }
       const acc = findAccount({ p: 'email', v: user.email.toLowerCase() });
       if (acc) { if (!SESSION?.accountId) login(acc.id, true); render(); creditReferrals().catch(() => {}); }
       else if (!SESSION?.accountId && !(ui.auth && ui.auth.step === 'choose')) resolveIdentity({ p: 'email', v: user.email.toLowerCase() });
