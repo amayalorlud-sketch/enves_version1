@@ -8143,6 +8143,11 @@ CLOSABLE.add('parent-guide');
     return _rp().replace('<main>', '<main><div class="row" style="justify-content:flex-end"><button class="link" data-act="parent-guide">¿Cómo funciona? Ver guía</button></div>');
   };
 }
+/* Tocar tu foto o iniciales de arriba abre «Foto de perfil» */
+document.addEventListener('click', (e) => {
+  const av = e.target.closest('.me-chip .avatar'); if (!av || !SESSION?.accountId) return;
+  ui.sheet = { type: 'photo' }; renderLayer();
+});
 
 
 /* ================================================================ BUCLE */
