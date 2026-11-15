@@ -8162,9 +8162,13 @@ function boot() {
     'auth/email-already-in-use': 'Ya hay una cuenta con ese correo. Pulsa «Ya tengo cuenta».',
     'auth/invalid-credential': 'Correo o contraseña incorrectos.', 'auth/wrong-password': 'Correo o contraseña incorrectos.', 'auth/user-not-found': 'No hay ninguna cuenta con ese correo.',
     'auth/weak-password': 'La contraseña necesita al menos 6 caracteres.', 'auth/invalid-email': 'Ese correo no es válido.',
+    'auth/operation-not-allowed': 'El acceso con correo no está activado en Firebase (Authentication → Método de acceso → Correo electrónico/contraseña).',
+    'auth/unauthorized-continue-uri': 'Falta autorizar este dominio en Firebase (Authentication → Configuración → Dominios autorizados).',
+    'auth/unauthorized-domain': 'Falta autorizar este dominio en Firebase (Authentication → Configuración → Dominios autorizados).',
+    'permission-denied': 'Faltan las reglas de Firestore (Firestore Database → Reglas → Publicar).',
     'auth/too-many-requests': 'Demasiados intentos. Espera unos minutos.', 'auth/network-request-failed': 'Sin conexión. Revisa tu internet.',
   };
-  const msg = (e) => ERR[e?.code] || 'No se ha podido completar. Inténtalo de nuevo.';
+  const msg = (e) => (ERR[e?.code] || 'No se ha podido completar. Inténtalo de nuevo.') + (e?.code ? ' [' + e.code + ']' : '');
   const busy = (on) => { document.querySelectorAll('#app button[type=submit]').forEach((b) => { b.disabled = on; }); };
 
   /* ---------- Copia de la cuenta en la nube (users/{uid}) ---------- */
@@ -8220,6 +8224,10 @@ function boot() {
     try { await creditReferrals(); } catch (e) { console.warn(e); }
   }
 
+  async function sendVerify() {
+    try { await FB.sendEmailVerification(user, { url: location.origin + location.pathname }); }
+    catch (e) { await FB.sendEmailVerification(user); }
+  }
   /* ---------- Pantallas de acceso ---------- */
   const origAuth = renderAuth;
   renderAuth = function () {
@@ -8257,7 +8265,7 @@ function boot() {
       try { await FB.sendPasswordResetEmail(auth, em); toast('Te hemos enviado un correo para cambiar la contraseña.'); } catch (er) { showErr(msg(er)); }
     }
     if (a === 'fb-check') { try { await user.reload(); user = auth.currentUser; if (user.emailVerified) { await user.getIdToken(true); enter(); } else showErr('Todavía no nos consta. Abre el enlace del correo y vuelve a pulsar.'); } catch (er) { showErr(msg(er)); } }
-    if (a === 'fb-resend') { try { await FB.sendEmailVerification(user, { url: location.origin + location.pathname }); toast('Correo reenviado.'); } catch (er) { showErr(msg(er)); } }
+    if (a === 'fb-resend') { try { await sendVerify(); toast('Correo reenviado.'); } catch (er) { showErr(msg(er)); } }
     if (a === 'fb-out' || a === 'logout') { if (user) { try { await FB.signOut(auth); } catch { /* */ } } user = null; lastJson = ''; if (a === 'fb-out') { ui.auth = { step: 'email', p: 'email', mode: 'signup' }; render(); } }
   }, true);
 
@@ -8269,7 +8277,7 @@ function boot() {
       ui.auth.email = em; busy(true);
       try {
         if (ui.auth.mode === 'login') { const c = await FB.signInWithEmailAndPassword(auth, em, pw); user = c.user; }
-        else { const c = await FB.createUserWithEmailAndPassword(auth, em, pw); user = c.user; await FB.sendEmailVerification(user, { url: location.origin + location.pathname }); }
+        else { const c = await FB.createUserWithEmailAndPassword(auth, em, pw); user = c.user; await sendVerify(); }
         if (user.emailVerified) enter(); else { ui.auth = { step: 'fb-verify' }; render(); }
       } catch (er) { busy(false); showErr(msg(er)); }
       return;
