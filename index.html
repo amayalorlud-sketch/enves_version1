@@ -7909,7 +7909,7 @@ const PLAN = { monthly: '4,99 €/mes', yearly: '39,99 €/año' }; // provision
 function isPlus(pid = SESSION.accountId) { return familySubActive(pid); }
 function plusLock(what) {
   return `<section class="panel tint-lav" style="align-items:flex-start"><span class="chip dark">Familia Plus</span><h3>${esc(what)}</h3>
-    <p class="small">Está en Familia Plus (${PLAN.monthly} o ${PLAN.yearly}, por familia). Con el plan gratis sigues teniendo el resumen semanal, los premios del catálogo y los mensajes ya escritos.</p>
+    <p class="small">Estará en Familia Plus, que llegará muy pronto. Con el plan gratis sigues teniendo el resumen semanal, los premios del catálogo y los mensajes ya escritos.</p>
     <button class="btn primary" data-act="tab" data-tab="perfil">Ver Familia Plus</button></section>`;
 }
 function parentSummaryFree(kid) {
@@ -7928,9 +7928,9 @@ function parentProfile() {
       <div class="list small"><div class="kv"><span></span><span class="muted">Gratis · Plus</span></div>
         ${row('Resumen semanal y calendario', 1, 1)}${row('Premios del catálogo de Envés (mín. 3)', 1, 1)}${row('Mensajes de ánimo ya escritos', 1, 1)}
         ${row('Premios personalizados', 0, 1)}${row('Mensajes escritos por ti y sorpresas', 0, 1)}${row('Avisos en tiempo real', 0, 1)}${row('Detalle de cada sesión', 0, 1)}${row('Horarios con aviso', 0, 1)}${row('Retos de la semana', 0, 1)}</div>
-      <p class="small"><b>Familia Plus: ${PLAN.monthly} o ${PLAN.yearly}</b>, IVA incluido, por familia (todos los hijos y dos tutores). Precio provisional.</p>
+      <p class="small"><b>Familia Plus llegará muy pronto</b>, por familia (todos los hijos y dos tutores).</p>
       ${s.status === 'active' ? '<div class="row"><button class="btn small ghost" data-act="sub-cancel">Darme de baja</button><button class="btn small ghost" data-act="sub-cancel">Desistir del contrato (14 días)</button></div>'
-        : '<div class="grid2"><button class="btn primary" data-act="sub-activate">Suscribirme por 4,99 €/mes</button><button class="btn" data-act="sub-activate">39,99 €/año</button></div>'}
+        : '<p class="note indigo"><b>Familia Plus · próximamente.</b> Aún no se puede contratar.</p>'}
       <p class="small muted">Durante la beta no se cobra nada.</p>
       </section>
     ${helpSection('parent')}`;
@@ -8274,6 +8274,14 @@ function boot() {
     try { await FB.sendEmailVerification(user, { url: location.origin + location.pathname }); }
     catch (e) { await FB.sendEmailVerification(user); }
   }
+
+  /* ---------- Familia Plus bloqueado hasta tener pasarela de pago ---------- */
+  PLAN.monthly = 'próximamente'; PLAN.yearly = 'sin precio aún';
+  isPlus = function () { return false; };
+  familySubActive = function () { return false; };
+  familySubOf = function () { return {}; };
+  trialBanner = function () { return ''; };
+  ACT['sub-activate'] = () => toast('Familia Plus estará disponible muy pronto. De momento tienes el plan gratis.');
   /* ---------- Pantallas de acceso ---------- */
   const origAuth = renderAuth;
   renderAuth = function () {
