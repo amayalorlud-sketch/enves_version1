@@ -8234,7 +8234,7 @@ function boot() {
       </form>
       <div class="row" style="justify-content:space-between">
         <button class="link" data-act="fb-mode">${au.mode === 'login' ? 'No tengo cuenta: crearla' : 'Ya tengo cuenta'}</button>
-        ${au.mode === 'login' ? '<button class="link" data-act="fb-reset">He olvidado la contraseña</button>' : ''}
+        <button class="link" data-act="fb-reset">He olvidado la contraseña</button>
       </div></section>`;
     if (au.step === 'fb-verify') return `<section><h2>Revisa tu correo</h2>
       <p>Te hemos enviado un enlace a <b>${esc(user?.email || '')}</b>. Ábrelo para confirmar que el correo es tuyo y vuelve aquí.</p>
