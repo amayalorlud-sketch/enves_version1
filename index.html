@@ -4748,7 +4748,8 @@ const isChildSession = () => { try { return ACC()?.type === 'child'; } catch { r
 function band(t) { const h = Number.isInteger(S?.demoHour) ? S.demoHour : new Date(t).getHours(); const B = isPrimary() ? PRIMARY_BANDS : isChildSession() ? CHILD_BANDS : CFG.bands; return B.find((b) => h >= b.from && h < b.to) || B[0]; }
 const isPrimary = () => { try { return isChildSession() && /Primaria/.test(ST()?.user?.course || ''); } catch { return false; } };
 const PRIMARY_BANDS = [{ from: 7, to: 21, x: 1.2, label: 'franja de día' }, { from: 21, to: 24, x: 0, label: 'a partir de las 21:00 no suma' }, { from: 0, to: 7, x: 0, label: 'de noche no suma' }];
-const capFor = () => (isPrimary() ? 60 : isChildSession() ? Math.min(150, ST()?.capOverride || 150) : CFG.dailyCap); // Primaria: tope de 60 al día (propuesta, pendiente de Tokenomics)
+const stageCap = () => { const c = ST()?.user?.course || ''; return /Primaria/.test(c) ? 150 : /Bach/.test(c) ? 300 : 250; }; // decisión de la fundadora 15/11
+const capFor = () => (isChildSession() ? Math.min(stageCap(), ST()?.capOverride || stageCap()) : CFG.dailyCap); // Primaria: tope de 60 al día (propuesta, pendiente de Tokenomics)
 const curve = (pos) => (pos <= CFG.plateauMin ? 1 : Math.exp(-(pos - CFG.plateauMin) / CFG.decayTauMin));
 const streakMult = (s) => Math.min(1 + CFG.streakAlpha * Math.log(1 + s), CFG.streakMax);
 
@@ -7970,7 +7971,7 @@ document.addEventListener('submit', (e) => {
 SHEETS['points-guide'] = () => `<p class="eyebrow">Perfil escolar</p><h2>¿Cuántos puntos se ganan?</h2><div class="ai-out small">
   <ul><li><b>1 punto por minuto</b> de estudio concentrado, hasta 50 minutos seguidos. Después cada minuto suma menos, hasta que hace un descanso.</li>
   <li>De 7:00 a 21:00 los minutos valen <b>×1,2</b>; de 21:00 a 22:00, ×1. <b>A partir de las 22:00 no suma nada</b>.</li>
-  <li>La racha (días seguidos con al menos 25 min) multiplica hasta ×1,5.</li><li>Como mucho <b>150 puntos al día</b> (en Primaria, <b>60</b> y nada a partir de las 21:00).</li></ul></div>
+  <li>La racha (días seguidos con al menos 25 min) multiplica hasta ×1,5.</li><li>Como mucho al día: <b>150 puntos en Primaria</b>, <b>250 en la ESO</b> y <b>300 en Bachillerato</b> (en Primaria, nada a partir de las 21:00).</li></ul></div>
   <div class="list small">
     <div class="kv"><span>1 hora de estudio por la tarde</span><span>≈ 60–70 puntos</span></div>
     <div class="kv"><span>1 hora al día de lunes a viernes</span><span>≈ 300–350 a la semana</span></div>
