@@ -8257,7 +8257,7 @@ function boot() {
       try { await FB.sendPasswordResetEmail(auth, em); toast('Te hemos enviado un correo para cambiar la contraseña.'); } catch (er) { showErr(msg(er)); }
     }
     if (a === 'fb-check') { try { await user.reload(); user = auth.currentUser; if (user.emailVerified) { await user.getIdToken(true); enter(); } else showErr('Todavía no nos consta. Abre el enlace del correo y vuelve a pulsar.'); } catch (er) { showErr(msg(er)); } }
-    if (a === 'fb-resend') { try { await FB.sendEmailVerification(user); toast('Correo reenviado.'); } catch (er) { showErr(msg(er)); } }
+    if (a === 'fb-resend') { try { await FB.sendEmailVerification(user, { url: location.origin + location.pathname }); toast('Correo reenviado.'); } catch (er) { showErr(msg(er)); } }
     if (a === 'fb-out' || a === 'logout') { if (user) { try { await FB.signOut(auth); } catch { /* */ } } user = null; lastJson = ''; if (a === 'fb-out') { ui.auth = { step: 'email', p: 'email', mode: 'signup' }; render(); } }
   }, true);
 
@@ -8269,7 +8269,7 @@ function boot() {
       ui.auth.email = em; busy(true);
       try {
         if (ui.auth.mode === 'login') { const c = await FB.signInWithEmailAndPassword(auth, em, pw); user = c.user; }
-        else { const c = await FB.createUserWithEmailAndPassword(auth, em, pw); user = c.user; await FB.sendEmailVerification(user); }
+        else { const c = await FB.createUserWithEmailAndPassword(auth, em, pw); user = c.user; await FB.sendEmailVerification(user, { url: location.origin + location.pathname }); }
         if (user.emailVerified) enter(); else { ui.auth = { step: 'fb-verify' }; render(); }
       } catch (er) { busy(false); showErr(msg(er)); }
       return;
@@ -8299,16 +8299,22 @@ function boot() {
     }
   }, true);
 
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible' || !user || user.emailVerified || ui.auth?.step !== 'fb-verify') return;
+    try { await user.reload(); user = auth.currentUser; if (user.emailVerified) { await user.getIdToken(true); enter(); } } catch { /* */ }
+  });
   /* ---------- Al abrir la app ---------- */
   if (ready) {
     FB.setPersistence(auth, FB.browserLocalPersistence).catch(() => {});
     FB.onAuthStateChanged(auth, async (u) => {
       user = u;
-      if (!u || !u.emailVerified) return;
-      try { await pull(); } catch (e) { console.warn(e); }
-      const acc = findAccount({ p: 'email', v: u.email.toLowerCase() });
-      if (acc && !SESSION?.accountId) login(acc.id, true);
-      render(); creditReferrals().catch(() => {});
+      if (!u) return;
+      if (!u.emailVerified) { try { await u.reload(); user = auth.currentUser; } catch { /* */ } }
+      if (!user.emailVerified) { if (!SESSION?.accountId) { ui.auth = { step: 'fb-verify' }; render(); } return; }
+      try { await user.getIdToken(true); await pull(); } catch (e) { console.warn(e); }
+      const acc = findAccount({ p: 'email', v: user.email.toLowerCase() });
+      if (acc) { if (!SESSION?.accountId) login(acc.id, true); render(); creditReferrals().catch(() => {}); }
+      else if (!SESSION?.accountId && !(ui.auth && ui.auth.step === 'choose')) resolveIdentity({ p: 'email', v: user.email.toLowerCase() });
     });
   }
 })();
