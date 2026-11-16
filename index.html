@@ -8319,6 +8319,7 @@ function boot() {
   window.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-act]'); if (!b) return;
     const a = b.dataset.act;
+    if (a.startsWith('fb-')) { e.stopImmediatePropagation(); e.preventDefault(); }
     if (a === 'auth-method' && b.dataset.p === 'email' && ready) { e.stopImmediatePropagation(); e.preventDefault(); ui.auth = { step: 'email', p: 'email', mode: 'login' }; render(); return; }
     if (a === 'fb-mode') { ui.auth.mode = ui.auth.mode === 'login' ? 'signup' : 'login'; ui.auth.email = document.querySelector('#fb-email')?.value || ''; render(); }
     if (a === 'fb-reset') {
@@ -8349,9 +8350,9 @@ function boot() {
       const err = (t) => { let p = f.querySelector('.note.danger'); if (!p) { p = document.createElement('p'); p.className = 'note danger'; f.insertBefore(p, f.querySelector('button[type=submit]')); } p.textContent = t; p.hidden = false; };
       busy(true);
       try {
-        if (alias.length >= 3) { const a = await FB.getDoc(FB.doc(db, 'aliases', alias.toLowerCase())); if (a.exists() && a.data().uid !== user.uid) { busy(false); return err('Ese alias ya está cogido. Prueba con otro.'); } }
+        if (alias.length >= 3) { const a = await within(FB.getDoc(FB.doc(db, 'aliases', alias.toLowerCase())), 5000); if (a.exists() && a.data().uid !== user.uid) { busy(false); return err('Ese alias ya está cogido. Prueba con otro.'); } }
         if (invite) {
-          const c = await FB.getDoc(FB.doc(db, 'codes', invite));
+          const c = await within(FB.getDoc(FB.doc(db, 'codes', invite)), 5000);
           if (!c.exists()) { busy(false); return err('Ese código de invitación no existe. Revísalo o déjalo en blanco.'); }
           if (c.data().uid === user.uid) { busy(false); return err('No puedes usar tu propio código.'); }
           ui.extInviter = c.data().uid;
