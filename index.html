@@ -8279,6 +8279,7 @@ const LEGAL = {
   function push() {
     if (!user || !user.emailVerified) return;
     const sl = slice(); if (!sl) return;
+    try { startSocial(); if (social) publishProfile(); } catch (e) { console.warn(e); }
     const json = JSON.stringify(sl); if (json === lastJson) return; lastJson = json;
     FB.setDoc(FB.doc(db, 'users', user.uid), { data: json, email: user.email, updatedAt: FB.serverTimestamp() }).catch((e) => console.warn('nube', e));
     const id = SESSION.accountId, st = S.students[id], acc = S.accounts[id];
@@ -8362,6 +8363,107 @@ const LEGAL = {
       <button class="btn small" data-act="sheet" data-sheet="legal" data-doc="Aviso legal">Aviso legal</button></div>
       <p class="small muted">¿Algo no funciona o tienes una idea? Escribe a <a href="mailto:${LEGAL_CONTACT}">${LEGAL_CONTACT}</a>.</p></section>` + _helpSection(type);
   };
+
+  /* ---------- Fase 1 · Amigos, grupos de ranking y rankings en la nube ----------
+     Firestore: profiles/{uid} (alias y minutos de la semana), friends/{par} (solicitudes y amistades),
+     fgroups/{id} (grupos de ranking). Los demás usuarios se reflejan en el móvil como cuentas «u_<uid>». */
+  const LID = (u) => (u === user?.uid ? SESSION?.accountId : 'u_' + u);
+  const UID = (id) => (id === SESSION?.accountId ? user?.uid : (id || '').startsWith('u_') ? id.slice(2) : null);
+  const pairId = (a, b) => [a, b].sort().join('_');
+  const profCache = {};
+  function stub(u, pr) {
+    if (!u || u === user?.uid) return;
+    const id = 'u_' + u, t = now(), wk = weekKey(t);
+    pr = pr || profCache[u] || {}; profCache[u] = pr;
+    S.accounts[id] = { ...(S.accounts[id] || {}), id, type: 'student', alias: pr.alias || S.accounts[id]?.alias || 'usuario', uni: pr.uni ? { id: pr.uni } : S.accounts[id]?.uni, photo: pr.photo || null, remote: true };
+    S.students[id] = { user: { alias: pr.alias || 'usuario', name: pr.alias || 'usuario' }, sessionsLog: pr.weekKey === wk && pr.weekFocus ? [{ at: t, end: t, focus: pr.weekFocus }] : [], ledger: [], invites: {}, live: pr.liveUntil > Date.now() ? { status: 'studying', until: pr.liveUntil } : null, remote: true };
+  }
+  async function loadProfiles(uids) {
+    const list = [...new Set(uids.filter((u) => u && u !== user?.uid))];
+    await Promise.all(list.map(async (u) => { try { const d = await within(FB.getDoc(FB.doc(db, 'profiles', u)), 5000); stub(u, d.exists() ? d.data() : {}); } catch { stub(u); } }));
+  }
+  let social = null, lastProf = '', lastFriendSync = 0;
+  const rerender = () => { save(); if (ui.tab === 'amigos' && !ui.sheet) render(); };
+  function publishProfile() {
+    const id = SESSION?.accountId, acc = S.accounts[id]; if (!acc || acc.type !== 'student' || !acc.alias) return;
+    const st = S.students[id], live = st?.live && st.live.status === 'studying' ? (st.live.until || 0) : 0;
+    const pr = { alias: acc.alias, aliasLower: acc.alias.toLowerCase(), uni: acc.uni?.id || null, weekKey: weekKey(now()), weekFocus: weekFocus(id), liveUntil: live, photo: acc.photo && acc.photo.length < 60000 ? acc.photo : null };
+    const j = JSON.stringify(pr); if (j === lastProf) return; lastProf = j;
+    FB.setDoc(FB.doc(db, 'profiles', user.uid), { ...pr, updatedAt: FB.serverTimestamp() }).catch((e) => console.warn('perfil', e));
+  }
+  function startSocial() {
+    if (social || !user?.emailVerified || ACC()?.type !== 'student' || !ACC()?.alias) return;
+    social = {};
+    social.fr = FB.onSnapshot(FB.query(FB.collection(db, 'friends'), FB.where('users', 'array-contains', user.uid)), async (snap) => {
+      const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      await loadProfiles(docs.flatMap((d) => d.users));
+      const me = SESSION.accountId;
+      S.friendships = (S.friendships || []).filter((f) => !(String(f.from).startsWith('u_') || String(f.to).startsWith('u_')));
+      for (const d of docs) S.friendships.push({ id: d.id, from: LID(d.from), to: LID(d.to), status: d.status, at: d.at || now() });
+      const newReq = docs.filter((d) => d.to === user.uid && d.status === 'pending' && d.at > lastFriendSync);
+      if (lastFriendSync && newReq.length) toast(`${aliasOf(LID(newReq[0].from))} quiere ser tu amigo.`);
+      lastFriendSync = Date.now(); rerender(); void me;
+    }, (e) => console.warn('amigos', e));
+    social.gr = FB.onSnapshot(FB.query(FB.collection(db, 'fgroups'), FB.where('members', 'array-contains', user.uid)), async (snap) => {
+      const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      await loadProfiles(docs.flatMap((d) => d.members));
+      S.fgroups = (S.fgroups || []).filter((g) => !g.remote && !docs.some((d) => d.id === g.id));
+      for (const d of docs) S.fgroups.push({ id: d.id, name: d.name, emoji: d.emoji, code: d.code, owner: LID(d.owner), members: d.members.map(LID), createdAt: d.createdAt || now(), remote: true });
+      rerender();
+    }, (e) => console.warn('grupos', e));
+    if (ui.groupCode) { const c = ui.groupCode; ui.groupCode = null; cloudJoin(c); }
+  }
+  async function refreshProfiles(force) {
+    if (!social) return; if (!force && Date.now() - (social.lastRefresh || 0) < 20000) return; social.lastRefresh = Date.now();
+    const ids = new Set(); (S.friendships || []).forEach((f) => { ids.add(UID(f.from)); ids.add(UID(f.to)); }); (S.fgroups || []).forEach((g) => g.members.forEach((m) => ids.add(UID(m))));
+    await loadProfiles([...ids]); rerender();
+  }
+  async function cloudJoin(code) {
+    try {
+      const res = await within(FB.getDocs(FB.query(FB.collection(db, 'fgroups'), FB.where('code', '==', code), FB.limit(1))), 6000);
+      if (res.empty) return toast('Ese código de grupo no existe.');
+      const d = res.docs[0], g = d.data();
+      if (g.members.includes(user.uid)) { ui.rankGroup = d.id; ui.tab = 'amigos'; ui.social = 'rank'; render(); return toast('Ya estás en ese grupo.'); }
+      if (g.members.length >= 50) return toast('Ese grupo está lleno (máximo 50).');
+      await FB.updateDoc(FB.doc(db, 'fgroups', d.id), { members: FB.arrayUnion(user.uid) });
+      ui.rankGroup = d.id; ui.tab = 'amigos'; ui.social = 'rank'; toast(`Te has unido a «${g.name}».`); celebrate();
+    } catch (e) { toast(msg(e)); }
+  }
+  const _join = joinGroupByCode;
+  joinGroupByCode = function (code, quiet) {
+    if (!social) return _join(code, quiet);
+    const g = (S.fgroups || []).find((x) => x.code === code);
+    if (g && g.members.includes(SESSION.accountId)) return 'Ya estás en ese grupo.';
+    cloudJoin(code); return null;
+  };
+  // Acciones de amistad → nube (después de que la app las aplique en el móvil)
+  const wrapAct = (k, fn) => { const o = ACT[k]; ACT[k] = (b) => { const r = o(b); if (social) fn(b); return r; }; };
+  const meU = () => user.uid;
+  wrapAct('fr-add', (b) => { const o = UID(b.dataset.id); if (!o) return; FB.setDoc(FB.doc(db, 'friends', pairId(meU(), o)), { users: [meU(), o].sort(), from: meU(), to: o, status: 'pending', at: Date.now() }).catch((e) => toast(msg(e))); });
+  wrapAct('fr-accept', (b) => { FB.updateDoc(FB.doc(db, 'friends', b.dataset.id), { status: 'accepted', at: Date.now() }).catch((e) => toast(msg(e))); });
+  wrapAct('fr-accept-user', (b) => { const o = UID(b.dataset.id); if (o) FB.updateDoc(FB.doc(db, 'friends', pairId(meU(), o)), { status: 'accepted', at: Date.now() }).catch((e) => toast(msg(e))); });
+  wrapAct('fr-reject', (b) => { FB.deleteDoc(FB.doc(db, 'friends', b.dataset.id)).catch(() => {}); });
+  wrapAct('fr-remove', (b) => { const o = UID(b.dataset.id); if (o) FB.deleteDoc(FB.doc(db, 'friends', pairId(meU(), o))).catch(() => {}); });
+  wrapAct('fgroup-leave', (b) => { if (b.dataset.id) FB.updateDoc(FB.doc(db, 'fgroups', b.dataset.id), { members: FB.arrayRemove(meU()) }).catch(() => {}); });
+  wrapAct('social-tab', () => refreshProfiles());
+  wrapAct('rank-group', () => refreshProfiles());
+  // Buscar amigos por alias en la nube (empieza por…)
+  window.addEventListener('submit', (e) => {
+    const f = e.target;
+    if (f.id === 'f-fsearch' && social) {
+      const q = (document.querySelector('#fs-q')?.value || '').trim().toLowerCase(); if (q.length < 2) return;
+      within(FB.getDocs(FB.query(FB.collection(db, 'profiles'), FB.orderBy('aliasLower'), FB.startAt(q), FB.endAt(q + ''), FB.limit(8))), 6000)
+        .then((res) => { res.forEach((d) => stub(d.id, d.data())); rerender(); }).catch((er) => console.warn('buscar', er));
+    }
+    if (f.id === 'f-fgroup' && social) {
+      setTimeout(() => {
+        const g = (S.fgroups || []).filter((x) => !x.remote && x.owner === SESSION.accountId).pop(); if (!g) return;
+        g.remote = true; save();
+        FB.setDoc(FB.doc(db, 'fgroups', g.id), { name: g.name, emoji: g.emoji, code: g.code, owner: meU(), members: g.members.map(UID).filter(Boolean), createdAt: g.createdAt })
+          .catch((er) => toast(msg(er)));
+      }, 50);
+    }
+  });
   /* ---------- Pantallas de acceso ---------- */
   const origAuth = renderAuth;
   renderAuth = function () {
@@ -8419,7 +8521,7 @@ const LEGAL = {
     }
     if (a === 'fb-check') { try { await within(user.reload()); user = auth.currentUser; if (user.emailVerified) { await within(user.getIdToken(true)).catch(() => {}); enter(); } else showErr('Todavía no nos consta. Abre el enlace del correo y vuelve a pulsar.'); } catch (er) { showErr(msg(er)); } }
     if (a === 'fb-resend') { try { await sendVerify(); toast('Correo reenviado.'); } catch (er) { showErr(msg(er)); } }
-    if (a === 'fb-out' || a === 'logout') { if (user) { try { await FB.signOut(auth); } catch { /* */ } } user = null; lastJson = ''; if (a === 'fb-out') { ui.auth = { step: 'email', p: 'email', mode: 'signup' }; render(); } }
+    if (a === 'fb-out' || a === 'logout') { if (user) { try { await FB.signOut(auth); } catch { /* */ } } user = null; lastJson = ''; if (social) { social.fr?.(); social.gr?.(); social = null; lastProf = ''; } if (a === 'fb-out') { ui.auth = { step: 'email', p: 'email', mode: 'signup' }; render(); } }
   }, true);
 
   window.addEventListener('submit', async (e) => {
@@ -8446,6 +8548,7 @@ const LEGAL = {
       e.preventDefault(); e.stopImmediatePropagation();
       const alias = document.querySelector('#u-alias').value.trim(), invite = document.querySelector('#u-invite').value.trim().toUpperCase();
       const err = (t) => { let p = f.querySelector('.note.danger'); if (!p) { p = document.createElement('p'); p.className = 'note danger'; f.insertBefore(p, f.querySelector('button[type=submit]')); } p.textContent = t; p.hidden = false; };
+      const vals = Object.fromEntries([...f.querySelectorAll('input[id],select[id]')].map((el) => [el.id, el.type === 'checkbox' ? el.checked : el.value]));
       busy(true);
       try {
         if (alias.length >= 3) { const a = await within(FB.getDoc(FB.doc(db, 'aliases', alias.toLowerCase())), 5000); if (a.exists() && a.data().uid !== user.uid) { busy(false); return err('Ese alias ya está cogido. Prueba con otro.'); } }
@@ -8457,7 +8560,11 @@ const LEGAL = {
           if (!Object.values(S.students).some((s) => s.user?.inviteCode?.toUpperCase() === invite)) S.students['ext_' + c.data().uid] = { extStub: true, user: { inviteCode: invite, alias: '' }, ledger: [], invites: { completed: 0, inProgress: 0 } };
         }
       } catch (er) { console.warn(er); }
-      busy(false); f.dataset.cloudOk = '1'; f.requestSubmit(); delete f.dataset.cloudOk;
+      busy(false);
+      // Si mientras esperábamos a la nube se ha redibujado la pantalla, el formulario es otro: se recuperan los datos escritos
+      let ff = document.getElementById('f-uni') || f;
+      if (ff !== f) for (const [k, v] of Object.entries(vals)) { const el = document.getElementById(k); if (el) { if (el.type === 'checkbox') el.checked = v; else el.value = v; } }
+      ff.dataset.cloudOk = '1'; ff.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); delete ff.dataset.cloudOk;
       setTimeout(() => {
         const st = S.students[SESSION?.accountId];
         if (st && ui.extInviter) { st.extInviter = ui.extInviter; if (st.invitedBy && st.invitedBy.startsWith('ext_')) st.invitedBy = 'ext_' + ui.extInviter; }
