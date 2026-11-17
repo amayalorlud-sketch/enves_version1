@@ -8148,6 +8148,68 @@ document.addEventListener('click', (e) => {
   ui.sheet = { type: 'photo' }; renderLayer();
 });
 
+/* ================================================================ v7 · Reseñas de los locales (Legal 15-11-b §7.4)
+   Solo opina quien ha canjeado en ese local. Se publica con el alias. El local puede responder.
+   Cualquiera puede denunciar una reseña (va a «Denuncias y quejas»); el equipo solo retira las que incumplen las normas, nunca por ser negativas. */
+const STARS = (n) => '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n);
+function reviewsOf(mid) { return (S.reviews || []).filter((r) => r.merchantId === mid && r.status !== 'removed').sort((a, b) => b.at - a.at); }
+function canReview(mid) {
+  const a = ACC(), st = ST(); if (!a || a.type !== 'student' || !st) return false;
+  return (S.redemptions || []).some((r) => r.merchantId === mid && r.alias === st.user.alias && r.status === 'confirmed');
+}
+function seedReviews() {
+  if (S.reviewsSeeded) return; S.reviewsSeeded = true; S.reviews = S.reviews || [];
+  const ms = Object.values(S.merchants || {}).filter((m) => m.status !== 'pending').slice(0, 2), t = now();
+  const sample = [[5, 'Mesas grandes y enchufes. Se puede estar toda la tarde estudiando sin que te miren mal.', 'irene_bio'], [4, 'El café muy bien y el canje fue rapidísimo. A partir de las 18:00 se llena.', 'dani.eco']];
+  ms.forEach((m, i) => { const [stars, text, alias] = sample[i]; S.reviews.push({ id: uid(), merchantId: m.id, by: null, alias, stars, text, at: t - (i + 2) * D, reply: i === 0 ? { text: '¡Gracias! Os esperamos en época de exámenes 💪', at: t - D } : null, status: 'ok' }); });
+}
+function reviewsBlock(m) {
+  if (!S.reviewsSeeded && Object.keys(S.merchants || {}).length && !window.CLOUD) seedReviews();
+  const list = reviewsOf(m.id), me = SESSION?.accountId, mine = list.find((r) => r.by === me), isOwner = MER()?.id === m.id, isAdmin = ACC()?.type === 'admin';
+  const avg = list.length ? list.reduce((a, r) => a + r.stars, 0) / list.length : 0;
+  const form = canReview(m.id) && !mine ? `<form id="f-review" class="stack" data-mid="${m.id}" novalidate>
+      <span class="lbl">Tu reseña</span>
+      <div class="row" role="radiogroup" aria-label="Estrellas">${[1, 2, 3, 4, 5].map((n) => `<label class="chip" style="cursor:pointer"><input type="radio" name="rv-stars" value="${n}" ${n === 5 ? 'checked' : ''} style="accent-color:var(--sun)"> ${n}★</label>`).join('')}</div>
+      <textarea id="rv-text" class="input" maxlength="300" style="min-height:70px" placeholder="¿Qué tal para estudiar? ¿Y el canje?"></textarea>
+      <p id="rv-err" class="note danger" hidden></p>
+      <button class="btn primary small" type="submit">Publicar reseña</button></form>` : '';
+  return `<section class="stack" style="gap:10px"><div class="spread"><h3>Reseñas en Envés</h3>${list.length ? `<span class="small"><b style="color:var(--sun-ink,#8a5a00)">${STARS(Math.round(avg))}</b> ${avg.toFixed(1)} · ${list.length}</span>` : ''}</div>
+    <p class="small muted">Solo pueden opinar quienes han canjeado en este local. Se publica tu alias, nunca tu nombre.</p>
+    ${form}
+    ${list.map((r) => `<div class="note" style="display:flex;flex-direction:column;gap:6px">
+      <div class="spread"><b>${esc(r.alias)}</b><span class="small" style="color:#8a5a00">${STARS(r.stars)}</span></div>
+      ${r.text ? `<p class="small" style="margin:0">${esc(r.text)}</p>` : ''}
+      <span class="small muted">${fmtWhen(r.at)}</span>
+      ${r.reply ? `<div class="small" style="border-left:3px solid var(--line,#ddd);padding-left:8px"><b>Respuesta del local:</b> ${esc(r.reply.text)}</div>` : ''}
+      ${isOwner && !r.reply ? `<form class="row" data-form="rv-reply" data-id="${r.id}" novalidate style="flex-wrap:nowrap"><input class="input" style="min-height:40px" maxlength="200" placeholder="Responder a ${esc(r.alias)}" aria-label="Respuesta"><button class="btn small" type="submit">Responder</button></form>` : ''}
+      <div class="row" style="gap:6px">${r.by === me ? `<button class="btn small ghost" data-act="rv-delete" data-id="${r.id}">Borrar mi reseña</button>` : `<button class="btn small ghost" data-act="rv-report" data-id="${r.id}">Denunciar</button>`}${isAdmin ? `<button class="btn small danger" data-act="rv-remove" data-id="${r.id}">Retirar (incumple normas)</button>` : ''}</div>
+    </div>`).join('') || '<p class="small muted">Aún no hay reseñas.</p>'}
+    <p class="small muted">Retiramos insultos, datos personales o contenido que no tenga que ver con el local. Nunca retiramos una reseña por ser negativa.</p></section>`;
+}
+{
+  const _lpv = localPublicView;
+  localPublicView = function (m) { return _lpv(m) + reviewsBlock(m); };
+}
+Object.assign(ACT, {
+  'rv-delete'(b) { S.reviews = (S.reviews || []).filter((r) => !(r.id === b.dataset.id && r.by === SESSION.accountId)); save(); renderLayer(); render(); toast('Reseña borrada.'); },
+  'rv-report'(b) { const r = (S.reviews || []).find((x) => x.id === b.dataset.id); if (!r) return; ui.sheet = { type: 'complaint', kind: 'usuario', target: r.by }; renderLayer(); toast('Cuéntanos qué incumple esta reseña.'); },
+  'rv-remove'(b) { if (!need('admin')) return; const r = (S.reviews || []).find((x) => x.id === b.dataset.id); if (r) { r.status = 'removed'; save(); renderLayer(); render(); toast('Reseña retirada.'); } },
+});
+document.addEventListener('submit', (e) => {
+  const f = e.target;
+  if (f.id === 'f-review') {
+    e.preventDefault(); const mid = f.dataset.mid; if (!canReview(mid)) return;
+    const stars = +(f.querySelector('input[name="rv-stars"]:checked')?.value || 0), text = $('#rv-text').value.trim();
+    if (!stars) { const el = $('#rv-err'); el.textContent = 'Elige de 1 a 5 estrellas.'; el.hidden = false; return; }
+    S.reviews = S.reviews || []; S.reviews.push({ id: uid(), merchantId: mid, by: SESSION.accountId, alias: ST().user.alias, stars, text, at: now(), reply: null, status: 'ok' });
+    save(); renderLayer(); render(); toast('¡Gracias! Tu reseña ya se ve.');
+  }
+  if (f.dataset?.form === 'rv-reply') {
+    e.preventDefault(); const r = (S.reviews || []).find((x) => x.id === f.dataset.id), txt = f.querySelector('input').value.trim();
+    if (!r || !txt || MER()?.id !== r.merchantId) return; r.reply = { text: txt, at: now() }; save(); render(); toast('Respuesta publicada.');
+  }
+});
+
 
 /* ================================================================ BUCLE */
 let lastSecond = 0;
