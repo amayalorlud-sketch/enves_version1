@@ -35,7 +35,8 @@ service cloud.firestore {
         && request.auth.uid in request.resource.data.users && request.resource.data.users.size() == 2
         && request.resource.data.status == 'pending';
       allow update: if verified() && request.auth.uid in resource.data.users
-        && request.resource.data.users == resource.data.users && request.resource.data.from == resource.data.from;
+        && request.resource.data.users == resource.data.users && request.resource.data.from == resource.data.from
+        && (request.resource.data.status == resource.data.status || request.auth.uid == resource.data.to);
       allow delete: if verified() && request.auth.uid in resource.data.users;
     }
     // Grupos de ranking: cualquiera verificado puede buscar por código; cada uno solo se añade o se quita a sí mismo
